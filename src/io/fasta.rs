@@ -52,9 +52,7 @@ impl<R: io::Read> Reader<R> {
         }
     }
 
-    /// Read next FASTA record into the given `Record`.
-    pub fn read(&mut self, record: &mut Record) -> io::Result<()> {
-        record.clear();
+    pub fn parse(&mut self, header: &mut String, seq: &mut String) -> io::Result<()> {
         if self.line.is_empty() {
             try!(self.reader.read_line(&mut self.line));
             if self.line.is_empty() {
@@ -65,17 +63,23 @@ impl<R: io::Read> Reader<R> {
         if !self.line.starts_with('>') {
             return Err(io::Error::new(io::ErrorKind::Other, "Expected > at record start."));
         }
-        record.header.push_str(&self.line);
+        header.push_str(&self.line);
         loop {
             self.line.clear();
             try!(self.reader.read_line(&mut self.line));
             if self.line.is_empty() || self.line.starts_with('>') {
                 break;
             }
-            record.seq.push_str(self.line.trim_right());
+            seq.push_str(self.line.trim_right());
         }
 
         Ok(())
+    }
+
+    /// Read next FASTA record into the given `Record`.
+    pub fn read(&mut self, record: &mut Record) -> io::Result<()> {
+        record.clear();
+        self.parse( &mut record.header, &mut record.seq )
     }
 
     /// Return an iterator over the records of this FastQ file.
