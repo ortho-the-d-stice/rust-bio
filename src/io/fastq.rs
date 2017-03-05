@@ -47,21 +47,18 @@ impl<R: io::Read> Reader<R> {
         }
     }
 
-    /// Read into a given record.
-    /// Returns an error if the record in incomplete or syntax is violated.
-    /// The content of the record can be checked via the record object.
-    pub fn read(&mut self, record: &mut Record) -> io::Result<()> {
-        record.clear();
-        try!(self.reader.read_line(&mut record.header));
+    pub fn parse(&mut self, mut header: &mut String, mut seq: &mut String,
+                 mut qual: &mut String) -> io::Result<()> {
+        try!(self.reader.read_line(&mut header));
 
-        if !record.header.is_empty() {
-            if !record.header.starts_with('@') {
+        if !header.is_empty() {
+            if !header.starts_with('@') {
                 return Err(io::Error::new(io::ErrorKind::Other, "Expected @ at record start."));
             }
-            try!(self.reader.read_line(&mut record.seq));
+            try!(self.reader.read_line(&mut seq));
             try!(self.reader.read_line(&mut self.sep_line));
-            try!(self.reader.read_line(&mut record.qual));
-            if record.qual.is_empty() {
+            try!(self.reader.read_line(&mut qual));
+            if qual.is_empty() {
                 return Err(io::Error::new(io::ErrorKind::Other,
                                           "Incomplete record. Each FastQ record has to consist \
                                            of 4 lines: header, sequence, separator and \
@@ -72,9 +69,20 @@ impl<R: io::Read> Reader<R> {
         Ok(())
     }
 
+    /// Read into a given record.
+    /// Returns an error if the record in incomplete or syntax is violated.
+    /// The content of the record can be checked via the record object.
+    pub fn read(&mut self, record: &mut Record) -> io::Result<()> {
+        record.clear();
+        self.parse( &mut record.header, &mut record.seq, &mut record.qual )
+    }
+
     /// Return an iterator over the records of this FastQ file.
     pub fn records(self) -> Records<R> {
         Records { reader: self }
+    }
+    pub fn sequences(self) -> Sequences<R> {
+        Sequences { reader: self }
     }
 }
 
@@ -172,6 +180,29 @@ impl<R: io::Read> Iterator for Records<R> {
             Ok(()) if record.is_empty() => None,
             Ok(()) => Some(Ok(record)),
             Err(err) => Some(Err(err)),
+        }
+    }
+}
+
+/// An iterator over sequences
+pub struct Sequences<R: io::Read> {
+    reader: Reader<R>,
+}
+
+impl<R: io::Read> Iterator for Sequences<R> {
+    type Item = io::Result<(String,String)>;
+
+    fn next(&mut self) -> Option<io::Result<(String,String)>> {
+        let mut header = String::new();
+        let mut seq = String::new();
+        let mut qual = String::new();
+        match self.reader.parse( &mut header, &mut seq, &mut qual ) {
+            Ok(()) => if header.is_empty() && seq.is_empty() {
+                None
+            } else {
+                Some( Ok( (header, seq) ) )
+            },
+            Err(e) => Some(Err(e)),
         }
     }
 }

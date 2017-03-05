@@ -86,6 +86,10 @@ impl<R: io::Read> Reader<R> {
     pub fn records(self) -> Records<R> {
         Records { reader: self }
     }
+
+    pub fn sequences(self) -> Sequences<R> {
+        Sequences { reader: self }
+    }
 }
 
 
@@ -378,6 +382,28 @@ impl<R: io::Read> Iterator for Records<R> {
             Ok(()) if record.is_empty() => None,
             Ok(()) => Some(Ok(record)),
             Err(err) => Some(Err(err)),
+        }
+    }
+}
+
+/// An iterator over sequences
+pub struct Sequences<R: io::Read> {
+    reader: Reader<R>,
+}
+
+impl<R: io::Read> Iterator for Sequences<R> {
+    type Item = io::Result<(String,String)>;
+
+    fn next(&mut self) -> Option<io::Result<(String,String)>> {
+        let mut header = String::new();
+        let mut seq = String::new();
+        match self.reader.parse( &mut header, &mut seq ) {
+            Ok(()) => if header.is_empty() && seq.is_empty() {
+                None
+            } else {
+                Some( Ok( (header, seq) ) )
+            },
+            Err(e) => Some(Err(e)),
         }
     }
 }
