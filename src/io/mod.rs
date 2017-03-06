@@ -7,7 +7,7 @@ pub mod bed;
 pub mod gff;
 
 use std::io as std_io;
-use std::io::{ BufRead, Seek, Read, SeekFrom };
+use std::io::{ Seek, Read, SeekFrom };
 use std::fs::File;
 use flate2::read::GzDecoder;
 
@@ -39,7 +39,7 @@ impl<R: Read> SeqReader<R> {
         let mut magic_num = [0u8; 2];
         let mut f = File::open(fname).unwrap();
         let _ = f.read_exact(&mut magic_num).unwrap();
-        f.seek(SeekFrom::Start(0));  // rewind
+        let _ = f.seek(SeekFrom::Start(0));  // rewind
 
         if magic_num == [0x1fu8, 0x8bu8] {
             // 1f 8b is the magic number of a gzip file
@@ -49,8 +49,8 @@ impl<R: Read> SeqReader<R> {
             let _ = gunz.read_exact(&mut magic_num).unwrap();
 
             // re-open the file, since GzDecoder doesn't have a seek()
-            let mut f = File::open(fname).unwrap();
-            let mut gunz = GzDecoder::new(f).unwrap();
+            let f = File::open(fname).unwrap();
+            let gunz = GzDecoder::new(f).unwrap();
 
             if magic_num[0] == '>' as u8 {
                 SeqReader::GzFasta(FAReader::new(gunz).sequences())
@@ -82,31 +82,5 @@ impl<R: std_io::Read> Iterator for SeqReader<R> {
             &mut SeqReader::GzFastq(ref mut rdr) => rdr.next(),
             _ => unimplemented!(),
         }
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io;
-    use io::fasta::Reader as FaRdr;
-    use io::fastq::Reader as FqRdr;
-
-    const FASTQ_FILE: &'static [u8] = b"@id desc
-ACCGTAGGCTGA
-+
-IIIIIIJJJJJJ
-";
-    const FASTA_FILE: &'static [u8] = b">id desc
-ACCGTAGGCTGA
-CCGTAGGCTGAA
-CGTAGGCTGAAA
-GTAGGCTGAAAA
-CCCC";
-
-    #[test]
-    fn test_reader() {
-
     }
 }
