@@ -22,6 +22,7 @@ pub enum Strand {
     Unknown,
 }
 
+/// wrapper for Sequences interface to Fasta & Fastq readers
 pub enum SeqReader<R: Read> {
     Nil,
     Fasta(FASequences<R>),
@@ -32,10 +33,11 @@ pub enum SeqReader<R: Read> {
 
 impl<R: Read> SeqReader<R> {
 
-    pub fn new(fname: &str) -> SeqReader<File> {
+    /// open specified file, automatically testing for gzip
+    /// and determining whether file is Fasta or Fastq
+    pub fn open(fname: &str) -> SeqReader<File> {
 
         // first test for gzip
-
         let mut magic_num = [0u8; 2];
         let mut f = File::open(fname).unwrap();
         let _ = f.read_exact(&mut magic_num).unwrap();
