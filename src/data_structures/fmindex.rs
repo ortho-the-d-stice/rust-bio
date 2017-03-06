@@ -4,6 +4,57 @@
 // except according to those terms.
 
 //! FM-Index and FMD-Index for finding suffix array intervals matching a given pattern in linear time.
+//!
+//! # Examples
+//!
+//! ## Generate
+//!
+//! ```
+//! use bio::data_structures::bwt::{bwt, less, Occ};
+//! use bio::data_structures::fmindex::{FMIndex, FMIndexable};
+//! use bio::data_structures::suffix_array::suffix_array;
+//! use bio::alphabets::dna;
+//!
+//! let text = b"GCCTTAACATTATTACGCCTA$";
+//! let alphabet = dna::n_alphabet();
+//! let sa = suffix_array(text);
+//! let bwt = bwt(text, &sa);
+//! let less = less(&bwt, &alphabet);
+//! let occ = Occ::new(&bwt, 3, &alphabet);
+//! let fm = FMIndex::new(&bwt, &less, &occ);
+//! ```
+//!
+//! ## Enclose in struct
+//!
+//! `FMIndex` was designed to not forcibly own the BWT and auxiliary data structures.
+//! It can take a reference (`&`) or any of the more complex pointer types.
+//! This means that you need to use `Rc` (a reference counted pointer) if you want to
+//! put the `FMIndex` into a struct.
+//!
+//! ```
+//! use std::rc::Rc;
+//! use bio::data_structures::bwt::{BWT, Less, bwt, less, Occ};
+//! use bio::data_structures::fmindex::{FMIndex, FMIndexable};
+//! use bio::data_structures::suffix_array::suffix_array;
+//! use bio::alphabets::dna;
+//! use bio::utils::TextSlice;
+//!
+//! pub struct Example {
+//!     fmindex: FMIndex<Rc<BWT>, Rc<Less>, Rc<Occ>>
+//! }
+//!
+//! impl Example {
+//!     pub fn new(text: TextSlice) -> Self {
+//!         let alphabet = dna::n_alphabet();
+//!         let sa = suffix_array(text);
+//!         let bwt = bwt(text, &sa);
+//!         let less = less(&bwt, &alphabet);
+//!         let occ = Occ::new(&bwt, 3, &alphabet);
+//!         let fm = FMIndex::new(Rc::new(bwt), Rc::new(less), Rc::new(occ));
+//!         Example { fmindex: fm }
+//!     }
+//! }
+//! ```
 
 use std::iter::DoubleEndedIterator;
 
@@ -13,7 +64,7 @@ use alphabets::dna;
 use std::mem::swap;
 
 /// A suffix array interval.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Interval {
     pub lower: usize,
     pub upper: usize,
@@ -142,7 +193,7 @@ impl<
 }
 
 /// A bi-interval on suffix array of the forward and reverse strand of a DNA text.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BiInterval {
     lower: usize,
     lower_rev: usize,
@@ -270,7 +321,7 @@ impl<
         let prev = &mut Vec::new();
         let mut matches = Vec::new();
 
-        let mut interval = self.init_interval(pattern[i]);
+        let mut interval = self.init_interval_with(pattern[i]);
 
         for &a in pattern[i + 1..].iter() {
             // forward extend interval
@@ -332,7 +383,7 @@ impl<
     }
 
     /// Initialize interval with given start character.
-    pub fn init_interval(&self, a: u8) -> BiInterval {
+    pub fn init_interval_with(&self, a: u8) -> BiInterval {
         let comp_a = dna::complement(a);
         let lower = self.fmindex.less(a);
 
@@ -341,6 +392,16 @@ impl<
             lower_rev: self.fmindex.less(comp_a),
             size: self.fmindex.less(a + 1) - lower,
             match_size: 1,
+        }
+    }
+
+    /// Initialize interval for empty pattern. The interval points at the whole suffix array.
+    pub fn init_interval(&self) -> BiInterval {
+        BiInterval {
+            lower: 0,
+            lower_rev: 0,
+            size: self.fmindex.bwt.len(),
+            match_size: 0
         }
     }
 
@@ -356,7 +417,11 @@ impl<
         // symbols and updating from previous one.
         for &b in b"$TGCNAtgcna".iter() {
             l += s;
-            o = self.fmindex.occ(interval.lower - 1, b);
+            o = if interval.lower == 0 {
+                0
+            } else {
+                self.fmindex.occ(interval.lower - 1, b)
+            };
             // calculate size
             s = self.fmindex.occ(interval.lower + interval.size - 1, b) - o;
             if b == a {
@@ -390,6 +455,24 @@ mod tests {
     use alphabets::dna;
     use data_structures::suffix_array::suffix_array;
     use data_structures::bwt::{bwt, less, Occ};
+
+    #[test]
+    fn test_fmindex() {
+        let text = b"GCCTTAACATTATTACGCCTA$";
+        let alphabet = dna::n_alphabet();
+        let sa = suffix_array(text);
+        let bwt = bwt(text, &sa);
+        let less = less(&bwt, &alphabet);
+        let occ = Occ::new(&bwt, 3, &alphabet);
+        let fm = FMIndex::new(&bwt, &less, &occ);
+
+        let pattern = b"TTA";
+        let sai = fm.backward_search(pattern.iter());
+
+        let positions = sai.occ(&sa);
+
+        assert_eq!(positions, [3, 12, 9]);
+    }
 
     #[test]
     fn test_smems() {
@@ -437,11 +520,16 @@ mod tests {
         let fmindex = FMIndex::new(&bwt, &less, &occ);
         let fmdindex = FMDIndex::from(fmindex);
         let pattern = b"T";
-        let interval = fmdindex.init_interval(pattern[0]);
-
+        let interval = fmdindex.init_interval_with(pattern[0]);
 
         assert_eq!(interval.forward().occ(&sa), [3, 5]);
         assert_eq!(interval.revcomp().occ(&sa), [8, 0]);
+
+        let empty = fmdindex.init_interval();
+        let extended = fmdindex.backward_ext(&empty, pattern[0]);
+        assert_eq!(extended, interval);
+        let extended = fmdindex.forward_ext(&empty, pattern[0]);
+        assert_eq!(extended, interval);
     }
 
     #[test]
